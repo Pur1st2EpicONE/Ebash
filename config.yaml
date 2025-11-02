@@ -1,0 +1,4 @@
+history_file: .ebash_history      # Path to the shell history file (relative or absolute)
+history_limit: 1000               # Maximum number of history entries to keep
+interrupt_prompt: ^C              # Text shown when the user presses Ctrl-C
+exit_message: exit                # Message displayed when the shell exits (EOF or exit command)
