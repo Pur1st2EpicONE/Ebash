@@ -6,6 +6,7 @@ package parser
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -27,8 +28,8 @@ type Pipe struct {
 // error when building a section or opening redirection files fails.
 func Parse(line string) ([]Pipe, error) {
 
-	line = os.ExpandEnv(line)
-	line = strings.NewReplacer("&&", " && ", "||", " || ", ">", " > ", "<", " < ").Replace(line)
+	line = expandEnv(line)
+	line = strings.NewReplacer("&&", " && ", "||", " || ", ">>", " >> ", ">", " > ", "<", " < ").Replace(line)
 
 	var pipeline []Pipe
 	var nextAnd, nextOr bool
@@ -117,10 +118,11 @@ func saveWithOperator(builder *strings.Builder, operator string, conditionals *[
 }
 
 // buildSection takes a conditional string (a part of the input without &&/||)
-// and splits it by pipe symbols (|) to produce the section (list of
-// commands). It also recognizes input (<) redirection for the first command
-// and output (>) redirection for the last command, opening files accordingly
-// and returning them alongside the parsed command arguments.
+// and splits it by pipe symbols to produce a section (list of commands).
+// It recognizes input redirection (<) for the first command and output
+// redirection (>, >>) for the last command, opens the corresponding files,
+// and returns them alongside the parsed command arguments for each command
+// in the section.
 func buildSection(conditional string) ([][]string, *os.File, *os.File, error) {
 
 	var err error
@@ -144,10 +146,14 @@ func buildSection(conditional string) ([][]string, *os.File, *os.File, error) {
 		}
 
 		if i == len(commands)-1 && strings.Contains(command, ">") {
-			output, cmdWithArgs, err = redirect(cmdWithArgs, ">")
-			if err != nil {
-				return nil, nil, nil, err
+			if strings.Contains(command, ">>") {
+				output, cmdWithArgs, err = redirect(cmdWithArgs, ">>")
+			} else {
+				output, cmdWithArgs, err = redirect(cmdWithArgs, ">")
 			}
+		}
+		if err != nil {
+			return nil, nil, nil, err
 		}
 
 		section = append(section, cmdWithArgs)
@@ -158,11 +164,11 @@ func buildSection(conditional string) ([][]string, *os.File, *os.File, error) {
 
 }
 
-// redirect searches cmdWithArgs for the redirection operator (`<` or `>`),
-// opens the referenced file (for reading or creating), removes the
-// redirection tokens from the argument slice, and returns the opened file
-// and the cleaned arguments. If no redirection operator is found, the
-// original arguments are returned with a nil file.
+// redirect searches cmdWithArgs for a redirection operator (`<`, `>` or `>>`),
+// opens the referenced file accordingly (read for `<`, create/truncate for `>`,
+// append for `>>`), removes the redirection tokens from the argument slice,
+// and returns the opened file along with the cleaned arguments. If no redirection
+// operator is found, it returns the original arguments and a nil file.
 func redirect(cmdWithArgs []string, direction string) (*os.File, []string, error) {
 
 	for i := range cmdWithArgs {
@@ -172,17 +178,19 @@ func redirect(cmdWithArgs []string, direction string) (*os.File, []string, error
 			var err error
 			var file *os.File
 
-			if direction == ">" {
+			switch direction {
+			case ">":
 				file, err = os.Create(cmdWithArgs[i+1])
-			} else {
+			case ">>":
+				file, err = os.OpenFile(cmdWithArgs[i+1], os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0777)
+			case "<":
 				file, err = os.Open(cmdWithArgs[i+1])
 			}
 			if err != nil {
 				return nil, nil, err
 			}
 
-			argsWithoutRedirect := make([]string, 0)
-			argsWithoutRedirect = append(argsWithoutRedirect, cmdWithArgs[:i]...)
+			argsWithoutRedirect := append([]string{}, cmdWithArgs[:i]...)
 			argsWithoutRedirect = append(argsWithoutRedirect, cmdWithArgs[i+2:]...)
 
 			return file, argsWithoutRedirect, nil
@@ -193,4 +201,20 @@ func redirect(cmdWithArgs []string, direction string) (*os.File, []string, error
 
 	return nil, cmdWithArgs, nil
 
+}
+
+func expandEnv(line string) string {
+	return os.Expand(line, func(key string) string {
+		switch key {
+		case "$":
+			return strconv.Itoa(os.Getpid())
+		case "PPID":
+			return strconv.Itoa(os.Getppid())
+		default:
+			if val, ok := os.LookupEnv(key); ok {
+				return val
+			}
+			return ""
+		}
+	})
 }

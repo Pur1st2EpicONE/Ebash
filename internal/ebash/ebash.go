@@ -30,13 +30,16 @@ import (
 // instance, a set of supported builtins, and a list of currently running
 // external commands.
 type Shell struct {
-	mu        sync.Mutex          // protects mutable fields (e.g. externals)
-	sigCh     chan os.Signal      // receives OS signals (e.g. os.Interrupt)
-	stopCh    chan struct{}       // closed to request shutdown of background goroutines
-	pipeline  []parser.Pipe       // parsed pipeline: sequence of conditional Pipe sections
-	terminal  *readline.Instance  // readline instance used to read user input
-	builtins  map[string]struct{} // set of builtin command names for quick lookup
-	externals []*exec.Cmd         // running external commands tracked for signaling/waiting
+	mu             sync.Mutex          // protects mutable fields (e.g. externals)
+	sigCh          chan os.Signal      // receives OS signals (e.g. os.Interrupt)
+	stopCh         chan struct{}       // closed to request shutdown of background goroutines
+	pipeline       []parser.Pipe       // parsed pipeline: sequence of conditional Pipe sections
+	terminal       *readline.Instance  // readline instance used to read user input
+	builtins       map[string]struct{} // set of builtin command names for quick lookup
+	externals      []*exec.Cmd         // running external commands tracked for signaling/waiting
+	descriptors    int                 // baseline number of file descriptors at shell startup
+	checkInterval  uint                // incremented each pipeline; file descriptor check runs only when reaching checkThreshold
+	checkThreshold uint                // number of iterations between descriptor checks
 }
 
 // Run starts the main interactive loop of the shell. It boots the shell,
@@ -76,20 +79,21 @@ func Run() {
 
 		shell.pipeline, err = parser.Parse(line)
 		if err != nil {
-			shell.reportErrors(err)
+			shell.sysmon(err)
 			continue
 		}
 
-		shell.reportErrors(shell.runPipeline())
+		shell.sysmon(shell.runPipeline())
 
 	}
 
 }
 
 // boot initializes the shell runtime. It loads configuration (falling back
-// to defaults on error), creates a readline terminal instance, sets up the
+// to defaults on error), creates a readline terminal instance, records the
+// baseline number of file descriptors for later leak detection, sets up the
 // builtin command table, and starts the interrupt handler goroutine.
-// The initialized Shell is returned or an error if initialization fails.
+// Returns the initialized Shell or an error if initialization fails.
 func boot() (*Shell, error) {
 
 	cfg, err := config.Load()
@@ -107,13 +111,20 @@ func boot() (*Shell, error) {
 
 	terminal, err := readline.NewEx(readlineCfg)
 	if err != nil {
-		return nil, fmt.Errorf("ebash: boot: failed to create new terminal instance: %v", err)
+		return nil, fmt.Errorf("ebash: boot: failed to create new terminal instance: %w", err)
+	}
+
+	descriptors, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", os.Getpid()))
+	if err != nil {
+		return nil, fmt.Errorf("ebash: boot: cannot read fd directory: %w", err)
 	}
 
 	shell := &Shell{
-		terminal: terminal,
-		sigCh:    make(chan os.Signal, 1),
-		stopCh:   make(chan struct{}),
+		terminal:       terminal,
+		sigCh:          make(chan os.Signal, 1),
+		stopCh:         make(chan struct{}),
+		descriptors:    len(descriptors),
+		checkThreshold: cfg.CheckThreshold,
 		builtins: map[string]struct{}{
 			"cd":   {},
 			"cd..": {},
@@ -247,8 +258,10 @@ func (shell *Shell) runPipe(pipe parser.Pipe) (int, error) {
 
 	}
 
+	closeDescriptors(reader, pipe.Input, pipe.Output)
+
 	if shell.externals != nil {
-		err = shell.sync(reader, pipe.Input, pipe.Output)
+		err = shell.sync()
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				return exitErr.ExitCode(), nil
@@ -272,15 +285,14 @@ func closeDescriptors(descriptors ...*os.File) {
 	}
 }
 
-// sync waits for any tracked external commands to finish, cleans up the
-// provided descriptors, and resets the external command list. It returns any
+// sync waits for any tracked external commands to finish
+// and resets the external command list. It returns any
 // error returned by external.Wait.
-func (shell *Shell) sync(reader, input, output *os.File) error {
+func (shell *Shell) sync() error {
 
 	shell.mu.Lock()
 
 	err := external.Wait(shell.externals)
-	closeDescriptors(reader, input, output)
 	shell.externals = nil
 
 	shell.mu.Unlock()
@@ -289,9 +301,48 @@ func (shell *Shell) sync(reader, input, output *os.File) error {
 
 }
 
-// reportErrors prints the provided error to standard error if it is non-nil.
-func (shell *Shell) reportErrors(err error) {
+// sysmon monitors the shell’s runtime state. It logs any provided errors
+// and checks for file descriptor leaks relative to the baseline count.
+// The check is performed only every `checkThreshold` pipelines;
+// `checkInterval` is incremented each pipeline and reset after the check.
+// Ensures that all file descriptors opened during pipeline execution
+// are properly closed.
+func (shell *Shell) sysmon(err error) {
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
+
+	shell.checkInterval++
+
+	if shell.checkInterval == shell.checkThreshold && shell.checkThreshold != 0 {
+
+		pid := os.Getpid()
+		fdDir := fmt.Sprintf("/proc/%d/fd", pid)
+		currDescriptors, err := os.ReadDir(fdDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "sysmon: cannot read fd dir:", err)
+			return
+		}
+
+		if len(currDescriptors) > shell.descriptors {
+
+			openDescriptors := []string{}
+			for _, openDescriptor := range currDescriptors {
+				openDescriptors = append(openDescriptors, openDescriptor.Name())
+			}
+
+			panic(fmt.Errorf(
+				"descriptor leak detected: %d file descriptors still open (PID=%d, open fds=%v)",
+				len(currDescriptors)-shell.descriptors,
+				os.Getpid(),
+				openDescriptors,
+			))
+
+		}
+
+		shell.checkInterval = 0
+
+	}
+
 }

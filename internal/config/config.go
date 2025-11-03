@@ -16,6 +16,7 @@ type Config struct {
 	HistoryLimit    int    `mapstructure:"history_limit"`
 	InterruptPrompt string `mapstructure:"interrupt_prompt"`
 	EOFPrompt       string `mapstructure:"exit_message"`
+	CheckThreshold  uint   `mapstructure:"check_threshold"`
 }
 
 // Load reads configuration from a file named "config" in the current
@@ -43,5 +44,6 @@ func Default() *Config {
 		HistoryLimit:    1000,
 		InterruptPrompt: "^C",
 		EOFPrompt:       "\nexit",
+		CheckThreshold:  10,
 	}
 }
