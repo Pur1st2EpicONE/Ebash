@@ -2,8 +2,8 @@
 
 all : ebash
 
-ebash:
-	@[ -f ebash ] || go build -o ebash ./cmd/ebash/main.go
+ebash: ./cmd/ebash/main.go $(shell find internal -name "*.go")
+	@go build -o ebash ./cmd/ebash/main.go
 	@./ebash
 
 clean:

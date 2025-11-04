@@ -8,15 +8,27 @@ import (
 	"os/exec"
 )
 
-// Execute starts an external command described by the command slice. The
-// function configures the process's standard input and output depending on
-// the provided connector (previous pipe), inputFile (redirection), outputFile
-// (redirection) and whether this command is the last in the pipeline.
-// Returns the started *exec.Cmd (so the caller can track/wait on it) or an
-// error if starting the process fails.
+// Execute starts an external command described by the command slice.
+// It configures standard input and output depending on the provided
+// connector (previous pipe), inputFile/outputFile (redirection), and
+// whether this command is the last in the pipeline.
+//
+// Special handling: if the command is "ls" or "grep" and the output
+// is not redirected to a file, the "--color=always" flag is prepended
+// to force color output.
+//
+// Returns the started *exec.Cmd so the caller can track/wait on it,
+// or an error if starting the process fails.
 func Execute(command []string, writer, connector, inputFile, outputFile *os.File, isLast bool) (*exec.Cmd, error) {
 
-	cmd := exec.Command(command[0], command[1:]...)
+	args := command[1:]
+	if command[0] == "ls" || command[0] == "grep" {
+		if outputFile == nil {
+			args = append([]string{"--color=always"}, args...)
+		}
+	}
+
+	cmd := exec.Command(command[0], args...)
 	cmd.Stderr = os.Stderr
 
 	if connector != nil {
@@ -42,11 +54,10 @@ func Execute(command []string, writer, connector, inputFile, outputFile *os.File
 	return cmd, nil
 }
 
-// Wait blocks until all provided external commands have finished. It returns
-// the last non-nil error observed from waits, or nil if all commands exited
-// successfully. This mirrors the behavior of waiting for a pipeline of
-// processes where earlier errors are recorded but the pipeline continues to
-// be waited on.
+// Wait blocks until all provided external commands have finished.
+// It returns the last non-nil error observed, or nil if all commands
+// exited successfully. This mirrors pipeline behavior: all processes
+// are waited on, but the last error is returned for reporting.
 func Wait(externals []*exec.Cmd) error {
 	var lastErr error
 	for _, command := range externals {

@@ -1,42 +1,96 @@
-// Package prompt provides a small utility to build the interactive shell
-// prompt string. It renders the current working directory (using ~ for the
-// user's home directory) with ANSI color escapes and exposes a single
-// Update function used by the shell to obtain the prompt.
+// Package prompt provides utilities to build and render the interactive shell
+// prompt. It handles displaying the current working directory (abbreviating
+// the user's home directory as `~`) and optionally the Git repository status
+// with ANSI color sequences. The main function exposed is Update, which
+// returns the formatted prompt string for the shell.
 package prompt
 
 import (
+	"Ebash/internal/painter"
+	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
-const (
-	green         = "\033[32m"
-	blue          = "\033[94m"
-	reset         = "\033[0m"
-	DefaultPrompt = "$ "
-)
+const DefaultPrompt = ">: "
 
-// Update returns the prompt string to be displayed to the user. The prompt
-// shows the current working directory (with the home directory abbreviated
-// as `~` when applicable) wrapped in ANSI color sequences. If the working
-// directory cannot be determined, DefaultPrompt is returned.
-func Update() string {
+// Update constructs and returns the prompt string for the shell. The prompt
+// shows the current working directory, abbreviated with ~ for the user's
+// home directory, and includes Git branch and status information. Paths
+// deeper than three levels are shortened to ~/.../parent/child. Colors and
+// bold styling are applied via the provided painter.Painter. If the current
+// working directory or home directory cannot be determined, DefaultPrompt
+// is returned.
+func Update(painter painter.Painter) string {
 
 	currPath, err := os.Getwd()
 	if err != nil {
 		return DefaultPrompt
 	}
 
-	homeDir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		homeDir = ""
+		return DefaultPrompt
 	}
 
-	promptPath := currPath
-	if homeDir != "" && strings.HasPrefix(currPath, homeDir) {
-		promptPath = "~" + strings.TrimPrefix(currPath, homeDir)
+	if home != "" && strings.HasPrefix(currPath, home) {
+		currPath = "~" + strings.TrimPrefix(currPath, home)
 	}
 
-	return green + promptPath + blue + reset + " "
+	currPathSplit := strings.Split(currPath, "/")
+	if len(currPathSplit) > 3 {
+		currPath = fmt.Sprintf("~/.../%s/%s", currPathSplit[len(currPathSplit)-2], currPathSplit[len(currPathSplit)-1])
+	}
+
+	pathStr := painter.Paint(painter.PathBold, painter.PathColour, currPath)
+	gitStr := painter.Paint(painter.GitBold, painter.GitColour, gitStatus())
+
+	return fmt.Sprintf("%s%s ", pathStr, gitStr)
+
+}
+
+// gitStatus returns a formatted string representing the Git branch and
+// the current repository status. It shows the branch name and counts of
+// modified and untracked files. Symbols used:
+//
+//	✓  - clean
+//	✗  - modified
+//	?  - untracked
+//
+// If the current directory is not a Git repository, an empty string is returned.
+func gitStatus() string {
+
+	branch, _ := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branchStr := strings.TrimSpace(string(branch))
+
+	if branchStr == "" {
+		return ""
+	}
+
+	outStatus, _ := exec.Command("git", "status", "--porcelain").Output()
+
+	lines := strings.Split(string(outStatus), "\n")
+
+	var modified, untracked int
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, " M") {
+			modified++
+		} else if strings.HasPrefix(line, "??") {
+			untracked++
+		}
+	}
+
+	switch {
+	case modified == 0 && untracked == 0:
+		return fmt.Sprintf("(%s ✓)", branchStr)
+	case modified == 0 && untracked != 0:
+		return fmt.Sprintf("(%s ?:%d ✗)", branchStr, untracked)
+	case modified != 0 && untracked == 0:
+		return fmt.Sprintf("(%s U:%d ✗)", branchStr, modified)
+	default:
+		return fmt.Sprintf("(%s U:%d ?:%d ✗)", branchStr, modified, untracked)
+	}
 
 }

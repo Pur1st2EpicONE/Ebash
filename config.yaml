@@ -1,5 +1,13 @@
-history_file: .ebash_history      # Path to the shell history file (relative or absolute)
-history_limit: 1000               # Maximum number of history entries to keep
-interrupt_prompt: ^C              # Text shown when the user presses Ctrl-C
-exit_message: exit                # Message displayed when the shell exits (EOF or exit command)
-check_threshold: 5                # Number of pipelines between file descriptor verifications; set 0 or leave empty to disable
+terminal:
+  history_file: .ebash_history      # Path to the shell history file (relative or absolute)
+  history_limit: 1000               # Maximum number of history entries to keep
+  interrupt_prompt: ^C              # Text shown when the user presses Ctrl-C
+  exit_message: exit                # Message displayed when the shell exits (EOF or exit command)
+  check_interval: 5                 # Number of pipelines between file descriptor verifications; set 0 or leave empty to disable
+
+prompt:
+  theme: ebash                      # Available themes: ebash, wildberries, monokai, ohmybash; if set, overrides the colors below, to use custom colors set 'none' or leave empty
+  path_colour: green                # ANSI color or Unicode escape for the current path (used only if theme is none)
+  path_colour_bold: false           # Bold path display (used only if theme is none)
+  git_status_colour: blue           # ANSI color or Unicode escape for git branch/status (used only if theme is none)
+  git_status_colour_bold: true      # Bold git info display (used only if theme is none)

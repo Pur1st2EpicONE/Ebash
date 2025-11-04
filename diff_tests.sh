@@ -21,7 +21,7 @@ commands=(
     "true || echo NOT OK | cat"
     "true && echo First && echo Second | cat"
     "false || echo One || echo Two | cat"
-    "cat < Makefile | grep .go | sort -r"
+    "cat < go.sum | grep 2.4 | sort -r"
     "cat < Makefile | grep .go | sort -r > tmp1.txt && echo OK || echo NOT OK"
     "cd ~ && ls -la | head -3 && echo OK || echo NOT OK"
     "ls | sort | grep Makefile"
@@ -34,7 +34,7 @@ for cmd in "${commands[@]}"; do
     tmp1=$(mktemp)
     tmp2=$(mktemp)
 
-    echo "$cmd" | ./ebash 2>&1 > "$tmp1"
+    echo "$cmd" | ./ebash 2>&1 | sed -r "s/\x1B\[[0-9;]*[mK]//g" > "$tmp1"
 
     bash -c "$cmd" 2>&1 > "$tmp2"
 

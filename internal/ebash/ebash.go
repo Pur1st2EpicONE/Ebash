@@ -17,8 +17,10 @@ import (
 	"github.com/chzyer/readline"
 
 	"Ebash/internal/builtin"
+	"Ebash/internal/completer"
 	"Ebash/internal/config"
 	"Ebash/internal/external"
+	"Ebash/internal/painter"
 	"Ebash/internal/parser"
 
 	"Ebash/internal/prompt"
@@ -30,16 +32,17 @@ import (
 // instance, a set of supported builtins, and a list of currently running
 // external commands.
 type Shell struct {
-	mu             sync.Mutex          // protects mutable fields (e.g. externals)
-	sigCh          chan os.Signal      // receives OS signals (e.g. os.Interrupt)
-	stopCh         chan struct{}       // closed to request shutdown of background goroutines
-	pipeline       []parser.Pipe       // parsed pipeline: sequence of conditional Pipe sections
-	terminal       *readline.Instance  // readline instance used to read user input
-	builtins       map[string]struct{} // set of builtin command names for quick lookup
-	externals      []*exec.Cmd         // running external commands tracked for signaling/waiting
-	descriptors    int                 // baseline number of file descriptors at shell startup
-	checkInterval  uint                // incremented each pipeline; file descriptor check runs only when reaching checkThreshold
-	checkThreshold uint                // number of iterations between descriptor checks
+	mu            sync.Mutex          // protects mutable fields (e.g. externals)
+	sigCh         chan os.Signal      // receives OS signals (e.g. os.Interrupt)
+	stopCh        chan struct{}       // closed to request shutdown of background goroutines
+	painter       painter.Painter     // renders the shell prompt with colors and styles
+	pipeline      []parser.Pipe       // parsed pipeline: sequence of conditional Pipe sections
+	terminal      *readline.Instance  // readline instance used to read user input
+	builtins      map[string]struct{} // set of builtin command names for quick lookup
+	externals     []*exec.Cmd         // running external commands tracked for signaling/waiting
+	descriptors   int                 // baseline number of file descriptors at shell startup
+	checkCounter  uint                // incremented each pipeline; fd check runs only when reaching checkInterval
+	checkInterval uint                // number of pipelines between descriptor checks; set to 0 in config to disable
 }
 
 // Run starts the main interactive loop of the shell. It boots the shell,
@@ -57,7 +60,8 @@ func Run() {
 
 	for {
 
-		shell.terminal.SetPrompt(prompt.Update())
+		shell.terminal.Config.AutoComplete = completer.Update()
+		shell.terminal.SetPrompt(prompt.Update(shell.painter))
 
 		line, err := shell.terminal.Readline()
 		if err != nil {
@@ -92,7 +96,8 @@ func Run() {
 // boot initializes the shell runtime. It loads configuration (falling back
 // to defaults on error), creates a readline terminal instance, records the
 // baseline number of file descriptors for later leak detection, sets up the
-// builtin command table, and starts the interrupt handler goroutine.
+// builtin command table, initializes the prompt painter, and starts the
+// interrupt handler goroutine.
 // Returns the initialized Shell or an error if initialization fails.
 func boot() (*Shell, error) {
 
@@ -103,10 +108,10 @@ func boot() (*Shell, error) {
 	}
 
 	readlineCfg := &readline.Config{
-		HistoryFile:     cfg.HistoryFile,
-		HistoryLimit:    cfg.HistoryLimit,
-		InterruptPrompt: cfg.InterruptPrompt,
-		EOFPrompt:       "\n" + cfg.EOFPrompt,
+		HistoryFile:     cfg.Terminal.HistoryFile,
+		HistoryLimit:    cfg.Terminal.HistoryLimit,
+		InterruptPrompt: cfg.Terminal.InterruptPrompt,
+		EOFPrompt:       "\n" + cfg.Terminal.EOFPrompt,
 	}
 
 	terminal, err := readline.NewEx(readlineCfg)
@@ -120,11 +125,12 @@ func boot() (*Shell, error) {
 	}
 
 	shell := &Shell{
-		terminal:       terminal,
-		sigCh:          make(chan os.Signal, 1),
-		stopCh:         make(chan struct{}),
-		descriptors:    len(descriptors),
-		checkThreshold: cfg.CheckThreshold,
+		terminal:      terminal,
+		sigCh:         make(chan os.Signal, 1),
+		stopCh:        make(chan struct{}),
+		descriptors:   len(descriptors),
+		checkInterval: cfg.Terminal.CheckInterval,
+		painter:       painter.NewPainter(cfg.Prompt),
 		builtins: map[string]struct{}{
 			"cd":   {},
 			"cd..": {},
@@ -303,19 +309,19 @@ func (shell *Shell) sync() error {
 
 // sysmon monitors the shell’s runtime state. It logs any provided errors
 // and checks for file descriptor leaks relative to the baseline count.
-// The check is performed only every `checkThreshold` pipelines;
-// `checkInterval` is incremented each pipeline and reset after the check.
-// Ensures that all file descriptors opened during pipeline execution
-// are properly closed.
+// The check is performed only every `checkInterval` pipelines; `checkCounter`
+// is incremented on each pipeline execution and reset after the check.
+// If more descriptors are open than the baseline, the function panics
+// and reports the PID along with the currently open file descriptors.
 func (shell *Shell) sysmon(err error) {
 
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
 
-	shell.checkInterval++
+	shell.checkCounter++
 
-	if shell.checkInterval == shell.checkThreshold && shell.checkThreshold != 0 {
+	if shell.checkCounter == shell.checkInterval && shell.checkInterval != 0 {
 
 		pid := os.Getpid()
 		fdDir := fmt.Sprintf("/proc/%d/fd", pid)
@@ -341,7 +347,7 @@ func (shell *Shell) sysmon(err error) {
 
 		}
 
-		shell.checkInterval = 0
+		shell.checkCounter = 0
 
 	}
 
