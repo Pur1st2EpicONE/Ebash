@@ -60,8 +60,8 @@ func Run() {
 
 	for {
 
-		shell.terminal.Config.AutoComplete = completer.Update()
 		shell.terminal.SetPrompt(prompt.Update(shell.painter))
+		shell.terminal.Config.AutoComplete = completer.Update()
 
 		line, err := shell.terminal.Readline()
 		if err != nil {

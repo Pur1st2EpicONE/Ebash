@@ -6,5 +6,7 @@ import "Ebash/internal/ebash"
 
 // main starts the Ebash interactive shell.
 func main() {
+
 	ebash.Run()
+
 }

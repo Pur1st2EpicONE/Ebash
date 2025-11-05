@@ -16,7 +16,8 @@ import (
 //
 //   - Directory suggestions for `cd`.
 //   - Process IDs for `kill`.
-//   - All file and directory names for `ls`, `cat`, `vim`, `cut`, `grep`, `echo`, etc.
+//   - File and directory names for `ls`, `cat`, `vim`, `cut`, `grep`, `echo`, etc.
+//   - File and directory names for `rm` and `rm -rf` (supports both plain `rm` and `rm -rf <dir>`).
 //
 // Returns the configured AutoCompleter, or nil if the current directory
 // cannot be read.
@@ -29,6 +30,7 @@ func Update() readline.AutoCompleter {
 
 	var onlyDirs []readline.PrefixCompleterInterface
 	var procsToKill []readline.PrefixCompleterInterface
+	var rmCompleter []readline.PrefixCompleterInterface
 	var fileNamesToComplete []readline.PrefixCompleterInterface
 
 	for _, entry := range entries {
@@ -45,9 +47,13 @@ func Update() readline.AutoCompleter {
 		procsToKill = append(procsToKill, readline.PcItem(val))
 	}
 
+	rmCompleter = append(rmCompleter, fileNamesToComplete...)
+	rmCompleter = append(rmCompleter, readline.PcItem("-rf", fileNamesToComplete...))
+
 	completer := readline.NewPrefixCompleter(
-		readline.PcItem("kill", procsToKill...),
 		readline.PcItem("cd", onlyDirs...),
+		readline.PcItem("rm", rmCompleter...),
+		readline.PcItem("kill", procsToKill...),
 		readline.PcItem("ps", fileNamesToComplete...),
 		readline.PcItem("ls", fileNamesToComplete...),
 		readline.PcItem("cat", fileNamesToComplete...),
