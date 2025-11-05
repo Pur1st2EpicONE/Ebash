@@ -1,6 +1,6 @@
 // Package prompt provides utilities to build and render the interactive shell
 // prompt. It handles displaying the current working directory (abbreviating
-// the user's home directory as `~`) and optionally the Git repository status
+// the user's home directory as "~") and optionally the Git repository status
 // with ANSI color sequences. The main function exposed is Update, which
 // returns the formatted prompt string for the shell.
 package prompt

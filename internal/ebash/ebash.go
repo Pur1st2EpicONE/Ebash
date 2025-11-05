@@ -26,23 +26,23 @@ import (
 	"Ebash/internal/prompt"
 )
 
-// Shell holds the runtime state of the interactive shell. It contains
-// synchronization primitives, channels for signal handling and shutdown,
-// the parsed pipeline for the current input line, the readline terminal
-// instance, a set of supported builtins, and a list of currently running
-// external commands.
+// Shell holds the runtime state of the interactive ebash shell. It manages
+// synchronization, signal handling, terminal interaction, and command
+// execution. It also tracks running external processes and performs periodic
+// file descriptor checks to detect leaks.
 type Shell struct {
-	mu            sync.Mutex          // protects mutable fields (e.g. externals)
-	sigCh         chan os.Signal      // receives OS signals (e.g. os.Interrupt)
-	stopCh        chan struct{}       // closed to request shutdown of background goroutines
-	painter       painter.Painter     // renders the shell prompt with colors and styles
-	pipeline      []parser.Pipe       // parsed pipeline: sequence of conditional Pipe sections
-	terminal      *readline.Instance  // readline instance used to read user input
-	builtins      map[string]struct{} // set of builtin command names for quick lookup
-	externals     []*exec.Cmd         // running external commands tracked for signaling/waiting
-	descriptors   int                 // baseline number of file descriptors at shell startup
-	checkCounter  uint                // incremented each pipeline; fd check runs only when reaching checkInterval
-	checkInterval uint                // number of pipelines between descriptor checks; set to 0 in config to disable
+	mu            sync.Mutex           // protects mutable fields (e.g. externals)
+	sigCh         chan os.Signal       // receives OS signals (e.g. os.Interrupt)
+	stopCh        chan struct{}        // closed to request shutdown of background goroutines
+	painter       painter.Painter      // renders the shell prompt with colors and styles
+	pipeline      []parser.Pipe        // parsed pipeline: sequence of conditional Pipe sections
+	terminal      *readline.Instance   // readline instance used to read user input
+	builtins      map[string]struct{}  // set of builtin command names for quick lookup
+	completer     *completer.Completer // provides dynamic, context-aware tab completion for commands
+	externals     []*exec.Cmd          // running external commands tracked for signaling/waiting
+	descriptors   int                  // baseline number of file descriptors at shell startup
+	checkCounter  uint                 // incremented each pipeline; fd check runs only when reaching checkInterval
+	checkInterval uint                 // number of pipelines between descriptor checks; set to 0 in config to disable
 }
 
 // Run starts the main interactive loop of the shell. It boots the shell,
@@ -60,8 +60,8 @@ func Run() {
 
 	for {
 
+		shell.completer.Update()
 		shell.terminal.SetPrompt(prompt.Update(shell.painter))
-		shell.terminal.Config.AutoComplete = completer.Update()
 
 		line, err := shell.terminal.Readline()
 		if err != nil {
@@ -94,11 +94,9 @@ func Run() {
 }
 
 // boot initializes the shell runtime. It loads configuration (falling back
-// to defaults on error), creates a readline terminal instance, records the
-// baseline number of file descriptors for later leak detection, sets up the
-// builtin command table, initializes the prompt painter, and starts the
-// interrupt handler goroutine.
-// Returns the initialized Shell or an error if initialization fails.
+// to defaults if needed), sets up the readline terminal, initializes the
+// prompt painter and completer, and starts the interrupt handler.
+// Returns the initialized Shell instance or an error.
 func boot() (*Shell, error) {
 
 	cfg, err := config.Load()
@@ -131,6 +129,7 @@ func boot() (*Shell, error) {
 		descriptors:   len(descriptors),
 		checkInterval: cfg.Terminal.CheckInterval,
 		painter:       painter.NewPainter(cfg.Prompt),
+		completer:     completer.NewCompleter(),
 		builtins: map[string]struct{}{
 			"cd":   {},
 			"cd..": {},
@@ -140,6 +139,8 @@ func boot() (*Shell, error) {
 			"ps":   {},
 		},
 	}
+
+	shell.terminal.Config.AutoComplete = shell.completer
 
 	signal.Notify(shell.sigCh, os.Interrupt)
 	go shell.interruptHandler()
@@ -309,7 +310,7 @@ func (shell *Shell) sync() error {
 
 // sysmon monitors the shell’s runtime state. It logs any provided errors
 // and checks for file descriptor leaks relative to the baseline count.
-// The check is performed only every `checkInterval` pipelines; `checkCounter`
+// The check is performed only every "checkInterval" pipelines; "checkCounter"
 // is incremented on each pipeline execution and reset after the check.
 // If more descriptors are open than the baseline, the function panics
 // and reports the PID along with the currently open file descriptors.

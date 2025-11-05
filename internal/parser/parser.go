@@ -164,9 +164,9 @@ func buildSection(conditional string) ([][]string, *os.File, *os.File, error) {
 
 }
 
-// redirect searches cmdWithArgs for a redirection operator (`<`, `>` or `>>`),
-// opens the referenced file accordingly (read for `<`, create/truncate for `>`,
-// append for `>>`), removes the redirection tokens from the argument slice,
+// redirect searches cmdWithArgs for a redirection operator ("<", ">" or ">>"),
+// opens the referenced file accordingly (read for "<", create/truncate for ">",
+// append for ">>"), removes the redirection tokens from the argument slice,
 // and returns the opened file along with the cleaned arguments. If no redirection
 // operator is found, it returns the original arguments and a nil file.
 func redirect(cmdWithArgs []string, direction string) (*os.File, []string, error) {
@@ -203,6 +203,14 @@ func redirect(cmdWithArgs []string, direction string) (*os.File, []string, error
 
 }
 
+// expandEnv replaces environment variable references in the given string
+// using the same rules as os.Expand, with additional support for:
+//
+//   - "$$": expands to the current process ID (os.Getpid())
+//   - "$PPID": expands to the parent process ID (os.Getppid())
+//
+// All other variables are expanded from the current environment using
+// os.LookupEnv. Unrecognized variables are replaced with an empty string.
 func expandEnv(line string) string {
 	return os.Expand(line, func(key string) string {
 		switch key {

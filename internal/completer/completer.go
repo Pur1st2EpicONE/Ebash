@@ -1,7 +1,7 @@
 // Package completer provides filesystem- and process-aware tab completion
-// for the ebash shell. It generates suggestions for commands like `cd`,
-// `kill`, `ls`, `cat`, `vim`, and others based on the current directory
-// contents and currently running process IDs.
+// for the ebash shell. It dynamically builds completion suggestions for
+// common shell commands based on the current directory contents and running
+// system processes.
 package completer
 
 import (
@@ -11,21 +11,28 @@ import (
 	"github.com/chzyer/readline"
 )
 
-// Update scans the current working directory and running processes
-// to build a new readline.AutoCompleter instance for ebash. It provides:
-//
-//   - Directory suggestions for `cd`.
-//   - Process IDs for `kill`.
-//   - File and directory names for `ls`, `cat`, `vim`, `cut`, `grep`, `echo`, etc.
-//   - File and directory names for `rm` and `rm -rf` (supports both plain `rm` and `rm -rf <dir>`).
-//
-// Returns the configured AutoCompleter, or nil if the current directory
-// cannot be read.
-func Update() readline.AutoCompleter {
+// Completer adapts ebash's dynamic environment (filesystem and processes)
+// to the readline.AutoCompleter interface. It generates and updates
+// command-specific completion suggestions on each loop iteration.
+type Completer struct {
+	readlineCompleter *readline.PrefixCompleter
+}
+
+// NewCompleter returns a new Completer instance with an empty
+// underlying PrefixCompleter.
+func NewCompleter() *Completer {
+	return &Completer{readlineCompleter: readline.NewPrefixCompleter()}
+}
+
+// Update rebuilds the completion tree based on the current working directory
+// and system state. It scans files, directories, and running processes to
+// provide up-to-date suggestions for commands like "cd", "ls", "kill",
+// "rm", "cat", and others.
+func (c *Completer) Update() {
 
 	entries, err := os.ReadDir(".")
 	if err != nil {
-		return nil
+		return
 	}
 
 	var onlyDirs []readline.PrefixCompleterInterface
@@ -50,7 +57,7 @@ func Update() readline.AutoCompleter {
 	rmCompleter = append(rmCompleter, fileNamesToComplete...)
 	rmCompleter = append(rmCompleter, readline.PcItem("-rf", fileNamesToComplete...))
 
-	completer := readline.NewPrefixCompleter(
+	newCompleter := readline.NewPrefixCompleter(
 		readline.PcItem("cd", onlyDirs...),
 		readline.PcItem("rm", rmCompleter...),
 		readline.PcItem("kill", procsToKill...),
@@ -63,13 +70,19 @@ func Update() readline.AutoCompleter {
 		readline.PcItem("echo", fileNamesToComplete...),
 	)
 
-	return completer
+	c.readlineCompleter = newCompleter
 
+}
+
+// Do delegates the completion logic to the underlying PrefixCompleter.
+// It satisfies the readline.AutoCompleter interface.
+func (c *Completer) Do(line []rune, pos int) ([][]rune, int) {
+	return c.readlineCompleter.Do(line, pos)
 }
 
 // getPIDs reads the /proc directory to find all currently running
 // process IDs. It returns a slice of PID strings, which is used
-// to provide completion suggestions for the `kill` command.
+// to provide completion suggestions for the "kill" command.
 func getPIDs() []string {
 	proc, _ := os.ReadDir("/proc")
 	var pids []string
