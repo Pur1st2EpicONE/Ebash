@@ -49,11 +49,11 @@ func Load() (*Config, error) {
 	cfg := new(Config)
 
 	if err := viper.ReadInConfig(); err != nil {
-		return cfg, fmt.Errorf("ebash: boot: failed to load config: %v", err)
+		return cfg, fmt.Errorf("failed to load config: %v", err)
 	}
 
 	if err := viper.Unmarshal(cfg); err != nil {
-		return cfg, fmt.Errorf("ebash: boot: failed to unmarshal config: %v", err)
+		return cfg, fmt.Errorf("failed to unmarshal config: %v", err)
 	}
 
 	return cfg, nil

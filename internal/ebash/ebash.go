@@ -101,7 +101,7 @@ func boot() (*Shell, error) {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "ebash: boot: failed to load config: %v; falling back to default values\n", err)
 		cfg = config.Default()
 	}
 
@@ -114,19 +114,23 @@ func boot() (*Shell, error) {
 
 	terminal, err := readline.NewEx(readlineCfg)
 	if err != nil {
-		return nil, fmt.Errorf("ebash: boot: failed to create new terminal instance: %w", err)
+		return nil, fmt.Errorf("ebash: boot: fatal: failed to create new terminal instance: %w", err)
 	}
 
-	descriptors, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", os.Getpid()))
+	var descriptors int
+	entries, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", os.Getpid()))
 	if err != nil {
-		return nil, fmt.Errorf("ebash: boot: cannot read fd directory: %w", err)
+		fmt.Fprintf(os.Stderr, "ebash: boot: failed to read fd directory: %v; falling back to default descriptor count of 10\n", err)
+		descriptors = 10
+	} else {
+		descriptors = len(entries)
 	}
 
 	shell := &Shell{
 		terminal:      terminal,
 		sigCh:         make(chan os.Signal, 1),
 		stopCh:        make(chan struct{}),
-		descriptors:   len(descriptors),
+		descriptors:   descriptors,
 		checkInterval: cfg.Terminal.CheckInterval,
 		painter:       painter.NewPainter(cfg.Prompt),
 		completer:     completer.NewCompleter(),
