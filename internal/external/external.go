@@ -6,6 +6,8 @@ package external
 import (
 	"os"
 	"os/exec"
+
+	"golang.org/x/term"
 )
 
 // Execute starts an external command described by the command slice.
@@ -13,19 +15,15 @@ import (
 // connector (previous pipe), inputFile/outputFile (redirection), and
 // whether this command is the last in the pipeline.
 //
-// Special handling: if the command is "ls" or "grep" and the output
-// is not redirected to a file, the "--color=always" flag is prepended
-// to force color output.
-//
-// Returns the started *exec.Cmd so the caller can track/wait on it,
-// or an error if starting the process fails.
+// For "ls" and "grep", if stdout is a terminal, "--color=always" is added
+// to preserve color in interactive mode. This also allows clean integration
+// testing via external redirection and diff comparison with real bash,
+// without requiring ANSI color filtering.
 func Execute(command []string, writer, connector, inputFile, outputFile *os.File, isLast bool) (*exec.Cmd, error) {
 
 	args := command[1:]
-	if command[0] == "ls" || command[0] == "grep" {
-		if outputFile == nil {
-			args = append([]string{"--color=always"}, args...)
-		}
+	if (command[0] == "ls" || command[0] == "grep") && term.IsTerminal(int(os.Stdout.Fd())) {
+		args = append([]string{"--color=always"}, args...)
 	}
 
 	cmd := exec.Command(command[0], args...)
