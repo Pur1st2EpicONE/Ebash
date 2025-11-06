@@ -10,20 +10,20 @@ import (
 	"golang.org/x/term"
 )
 
-// Execute starts an external command described by the command slice.
+// Execute starts an external command defined by the command slice.
 // It configures standard input and output depending on the provided
-// connector (previous pipe), inputFile/outputFile (redirection), and
-// whether this command is the last in the pipeline.
+// connector (previous pipe), inputFile/outputFile (for redirection),
+// and whether this command is the last in the pipeline.
 //
-// For "ls" and "grep", if stdout is a terminal, "--color=always" is added
-// to preserve color in interactive mode. This also allows clean integration
-// testing via external redirection and diff comparison with real bash,
-// without requiring ANSI color filtering.
+// For "ls" and "grep", if the output is a terminal, "--color=auto" is added
+// so that colors appear in interactive mode but do not pollute pipes or files.
+// This ensures correct behavior in interactive shells while preserving clean
+// output for redirection, testing, or diff comparisons with real Bash.
 func Execute(command []string, writer, connector, inputFile, outputFile *os.File, isLast bool) (*exec.Cmd, error) {
 
 	args := command[1:]
 	if (command[0] == "ls" || command[0] == "grep") && term.IsTerminal(int(os.Stdout.Fd())) {
-		args = append([]string{"--color=always"}, args...)
+		args = append([]string{"--color=auto"}, args...)
 	}
 
 	cmd := exec.Command(command[0], args...)

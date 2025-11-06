@@ -77,7 +77,7 @@ func Run() {
 		if line == "" {
 			continue
 		} else if line == "exit" {
-			fmt.Println(line)
+			fmt.Println(shell.terminal.Config.EOFPrompt[1:])
 			return
 		}
 
@@ -332,7 +332,7 @@ func (shell *Shell) sysmon(err error) {
 		fdDir := fmt.Sprintf("/proc/%d/fd", pid)
 		currDescriptors, err := os.ReadDir(fdDir)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "sysmon: cannot read fd dir:", err)
+			fmt.Fprintln(os.Stderr, "ebash: sysmon: cannot read fd dir:", err)
 			return
 		}
 

@@ -1,4 +1,4 @@
-.PHONY: all ebash test diff_test lint
+.PHONY: all ebash clean test lint
 
 all : ebash
 
